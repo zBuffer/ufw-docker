@@ -45,14 +45,14 @@ function ufw-docker--allow() {
     local INSTANCE_PORT="$2"
     local PROTO="$3"
 
-    docker inspect "$INSTANCE_NAME" &>/dev/null ||
+    sudo docker inspect "$INSTANCE_NAME" &>/dev/null ||
         die "Docker instance \"$INSTANCE_NAME\" doesn't exist."
 
-    mapfile -t INSTANCE_IP_ADDRESSES < <(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' "$INSTANCE_NAME" 2>/dev/null | remove_blank_lines)
+    mapfile -t INSTANCE_IP_ADDRESSES < <(sudo docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' "$INSTANCE_NAME" 2>/dev/null | remove_blank_lines)
 
     [[ -z "${INSTANCE_IP_ADDRESSES:-}" ]] && die "Could not find a running instance \"$INSTANCE_NAME\"."
 
-    mapfile -t PORT_PROTO_LIST < <(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{with $conf}}{{$p}}{{"\n"}}{{end}}{{end}}' "$INSTANCE_NAME" | remove_blank_lines)
+    mapfile -t PORT_PROTO_LIST < <(sudo docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{with $conf}}{{$p}}{{"\n"}}{{end}}{{end}}' "$INSTANCE_NAME" | remove_blank_lines)
 
     if [[ -z "${PORT_PROTO_LIST:-}" ]]; then
         err "\"$INSTANCE_NAME\" doesn't have any published ports."
@@ -119,7 +119,7 @@ function ufw-docker--instance-name() {
     local INSTANCE_ID="$1"
     {
         {
-            docker inspect --format='{{.Name}}' "$INSTANCE_ID" 2>/dev/null | sed -e 's,^/,,' |
+            sudo docker inspect --format='{{.Name}}' "$INSTANCE_ID" 2>/dev/null | sed -e 's,^/,,' |
                 grep "^${GREP_REGEXP_INSTANCE_NAME}\$" 2>/dev/null
         } || echo -n "$INSTANCE_ID";
     } | remove_blank_lines
@@ -153,12 +153,12 @@ function ufw-docker--service() {
 
 function ufw-docker--get-service-id() {
     declare service_name="$1"
-    docker service inspect "${service_name}" --format "{{.ID}}"
+    sudo docker service inspect "${service_name}" --format "{{.ID}}"
 }
 
 function ufw-docker--get-service-name() {
     declare service_name="$1"
-    docker service inspect "${service_name}" --format "{{.Spec.Name}}"
+    sudo docker service inspect "${service_name}" --format "{{.Spec.Name}}"
 }
 
 function ufw-docker--service-allow() {
@@ -183,7 +183,7 @@ function ufw-docker--service-allow() {
 
     service_name="$(ufw-docker--get-service-name "${service_name}")"
 
-    exec 9< <(docker service inspect "$service_name" \
+    exec 9< <(sudo docker service inspect "$service_name" \
                      --format '{{range .Endpoint.Spec.Ports}}{{.PublishedPort}} {{.TargetPort}}/{{.Protocol}}{{"\n"}}{{end}}')
     while read -u 9 -r port target_port; do
         if [[ "$target_port" = "${service_port}/${service_proto}" ]]; then
@@ -195,9 +195,9 @@ function ufw-docker--service-allow() {
 
     [[ -z "${service_env:-}" ]] && die "Service $service_name does not publish port $service_port."
 
-    if ! docker service inspect "$ufw_docker_agent" &>/dev/null; then
+    if ! sudo docker service inspect "$ufw_docker_agent" &>/dev/null; then
         err "Not found ufw-docker-agent service, creating ..."
-        docker service create --name "$ufw_docker_agent" --mode global \
+        sudo docker service create --name "$ufw_docker_agent" --mode global \
                --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
                --mount type=bind,source=/etc/ufw,target=/etc/ufw,readonly=true \
                --env ufw_docker_agent_image="${ufw_docker_agent_image}" \
@@ -215,7 +215,7 @@ function ufw-docker--service-allow() {
         done
         exec 8<&-
 
-        docker service update --update-parallelism=0 \
+        sudo docker service update --update-parallelism=0 \
                --env-add ufw_docker_agent_image="${ufw_docker_agent_image}" \
                --env-add DEBUG="${DEBUG:-}" \
                "${service_env_list[@]}" \
@@ -225,7 +225,7 @@ function ufw-docker--service-allow() {
 }
 
 function ufw-docker--get-env-list() {
-    docker service inspect "${ufw_docker_agent}" \
+    sudo docker service inspect "${ufw_docker_agent}" \
            --format '{{range $k,$v := .Spec.TaskTemplate.ContainerSpec.Env}}{{ $v }}{{"\n"}}{{end}}' |
         sed -e '/^ufw_public_/!d' \
             -e 's/^ufw_public_//' \
@@ -248,7 +248,7 @@ function ufw-docker--service-delete() {
 
     [[ -z "${service_env:-}" ]] && die "Could not find service \"$service_name\""
 
-    docker service update --update-parallelism=0 \
+    sudo docker service update --update-parallelism=0 \
            --env-add ufw_docker_agent_image="${ufw_docker_agent_image}" \
            --env-add "${service_env}" \
            --image "${ufw_docker_agent_image}" \
